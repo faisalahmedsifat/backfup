@@ -1,6 +1,7 @@
 import typer
 from typing import Optional
 
+from commands.add import add_command
 from commands.init import init_command
 
 app = typer.Typer(
@@ -8,3 +9,4 @@ app = typer.Typer(
 )
 
 app.command("init")(init_command)
+app.command("add")(add_command)
