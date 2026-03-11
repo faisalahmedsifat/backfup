@@ -1,6 +1,9 @@
+import shutil
+import subprocess
 import typer
-import boto3
+from typing import Optional
 from botocore.exceptions import ClientError, EndpointResolutionError
+import boto3
 from loguru import logger
 
 from config.store import ConfigStore
@@ -23,20 +26,7 @@ def _get_s3_client(storage: dict):
     )
 
 
-def test_command(
-    storage: bool = typer.Option(False, "--storage", help="Test storage connectivity and permissions"),
-):
-    if not storage:
-        typer.echo("Specify what to test. Available options: --storage")
-        raise typer.Exit(1)
-
-    store = ConfigStore()
-
-    if not store.exists():
-        typer.echo("No configuration found. Run `backfup init` first.")
-        raise typer.Exit(1)
-
-    config = store.load()
+def _test_storage(config: dict):
     storage_config = config.get("storage")
 
     if not storage_config:
@@ -91,3 +81,69 @@ def test_command(
         typer.echo(f" WARNING\nCould not delete probe file ({PROBE_KEY}): {e}")
 
     typer.echo("\nStorage is configured correctly.")
+
+
+def _test_database(config: dict, name: str):
+    databases = config.get("databases", [])
+    db = next((d for d in databases if d["name"] == name), None)
+
+    if not db:
+        typer.echo(f"Database '{name}' not found. Run `backfup add` first.")
+        raise typer.Exit(1)
+
+    connection_url = resolve_credential(db["connection_url"])
+    typer.echo(f"Testing database: {name}\n")
+
+    # Step 1: check psql is available
+    typer.echo("Checking pg_dump availability...", nl=False)
+    if not shutil.which("pg_dump"):
+        typer.echo(" FAILED\nError: pg_dump not found. Install PostgreSQL client tools.")
+        raise typer.Exit(1)
+    typer.echo(" OK")
+
+    # Step 2: attempt a real connection
+    typer.echo("Connecting to database...", nl=False)
+    try:
+        result = subprocess.run(
+            ["psql", connection_url, "-c", "SELECT 1"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            typer.echo(f" FAILED\nError: {result.stderr.strip()}")
+            raise typer.Exit(1)
+        typer.echo(" OK")
+    except FileNotFoundError:
+        typer.echo(" FAILED\nError: psql not found. Install PostgreSQL client tools.")
+        raise typer.Exit(1)
+    except subprocess.TimeoutExpired:
+        typer.echo(" FAILED\nError: connection timed out.")
+        raise typer.Exit(1)
+
+    typer.echo(f"\nDatabase '{name}' is reachable.")
+
+
+def test_command(
+    storage: bool = typer.Option(False, "--storage", help="Test storage connectivity and permissions"),
+    database: Optional[str] = typer.Option(None, "--database", help="Test database connection by name (e.g. appdb)"),
+):
+    if not storage and not database:
+        typer.echo("Specify what to test. Available options: --storage, --database <name>")
+        raise typer.Exit(1)
+
+    store = ConfigStore()
+
+    if not store.exists():
+        typer.echo("No configuration found. Run `backfup init` first.")
+        raise typer.Exit(1)
+
+    config = store.load()
+
+    if storage:
+        _test_storage(config)
+
+    if database:
+        if storage:
+            typer.echo("")  # blank line between sections
+        _test_database(config, database)
