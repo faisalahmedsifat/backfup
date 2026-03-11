@@ -3,6 +3,7 @@ from typing import Optional
 
 from commands.add import add_command
 from commands.init import init_command
+from commands.test import test_command
 
 app = typer.Typer(
     help="Backfup CLI - A tool for backing up data to S3-compatible storage."
@@ -10,3 +11,4 @@ app = typer.Typer(
 
 app.command("init")(init_command)
 app.command("add")(add_command)
+app.command("test")(test_command)
