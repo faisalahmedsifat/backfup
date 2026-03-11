@@ -3,6 +3,7 @@ from typing import Optional
 
 from commands.add import add_command
 from commands.init import init_command
+from commands.studio import studio_command
 from commands.test import test_command
 
 app = typer.Typer(
@@ -12,3 +13,4 @@ app = typer.Typer(
 app.command("init")(init_command)
 app.command("add")(add_command)
 app.command("test")(test_command)
+app.command("studio")(studio_command)
