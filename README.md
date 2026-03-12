@@ -1,195 +1,192 @@
 # backfup
 
-**backfup** is a developer-focused CLI that automates database backups and uploads them to **any S3-compatible storage**.
-
-It removes the need for developers to maintain fragile scripts combining:
-
-* `pg_dump`
-* `gzip`
-* `cron`
-* `aws s3 cp`
-
-Instead, backups become a simple CLI workflow.
-
-Example usage:
+**backfup** is a developer-focused CLI for database backups and exploration. It automates the full backup lifecycle — dump, compress, upload — while also giving you a local browser-based interface to explore your data.
 
 ```
 backfup init
 backfup add --name app "$DATABASE_URL"
 backfup backup app
+backfup studio app
 ```
-
-Backups are stored in object storage and can later be restored with a single command.
 
 ---
 
-# Problem
+## Why backfup
 
-Database backups are usually implemented using shell scripts such as:
+Database backups are usually held together with shell scripts:
 
-```
-pg_dump
-gzip
-aws s3 cp
-cron
+```bash
+pg_dump | gzip | aws s3 cp ...
 ```
 
-This leads to several issues:
+This leads to fragile scripts, inconsistent naming, hard restore workflows, and a setup that no one on the team fully understands. `backfup` replaces all of that with a single unified tool.
 
-* fragile scripts
-* inconsistent backup naming
-* difficult setup for new developers
-* hard restore workflows
-* storage configuration complexity
-
-There is no unified interface for backup and restore operations.
+And while you're at it — actually looking at your data shouldn't require installing a native GUI app or paying for a SaaS. `backfup studio` opens a zero-config browser interface directly from your registered databases.
 
 ---
 
-# Goal
+## Install
 
-Provide a **minimal CLI tool** that handles:
+```bash
+pip install backfup
+```
 
-1. dumping databases
-2. compressing backups
-3. uploading to S3-compatible storage
-4. listing backups
-5. restoring backups
+### Dependencies
 
-A developer should be able to configure backups in **less than two minutes**.
+| Feature | Requires |
+|---|---|
+| PostgreSQL backup/restore | `pg_dump`, `psql` on PATH |
+| Studio | `fastapi`, `uvicorn`, `psycopg2-binary` |
+
+```bash
+uv add fastapi uvicorn psycopg2-binary
+```
 
 ---
 
-# Core Principles
+## Quickstart
 
-### Simple developer workflow
+### 1. Configure storage
 
-Commands should feel familiar and predictable.
-
-Example:
-
+```bash
+backfup init
 ```
+
+Interactive prompts will ask for your S3 endpoint, bucket, region, and credentials. Credentials can be stored directly or as environment variable references.
+
+Non-interactive:
+
+```bash
+backfup init \
+  --endpoint https://s3.amazonaws.com \
+  --bucket prod-backups \
+  --region us-east-1 \
+  --from-env \
+  --access-key-env BACKFUP_ACCESS_KEY \
+  --secret-key-env BACKFUP_SECRET_KEY
+```
+
+This produces `~/.backfup/config.yaml`:
+
+```yaml
+storage:
+  endpoint: https://s3.amazonaws.com
+  bucket: prod-backups
+  region: us-east-1
+  access_key: ENV("BACKFUP_ACCESS_KEY")
+  secret_key: ENV("BACKFUP_SECRET_KEY")
+```
+
+### 2. Register a database
+
+```bash
+backfup add postgres://user:pass@localhost:5432/mydb --name app
+```
+
+Or via environment variable:
+
+```bash
+backfup add --name app --from-env DATABASE_URL
+```
+
+### 3. Verify everything works
+
+```bash
+backfup test --storage
+backfup test --database app
+```
+
+### 4. Run a backup
+
+```bash
 backfup backup app
 ```
 
-### Storage provider neutrality
-
-Any S3-compatible object storage should work.
-
-### Secure configuration
-
-Secrets must support **environment variable references**.
-
-### Automation friendly
-
-Commands must support **non-interactive execution**.
-
----
-
-# Supported Databases (MVP)
-
-Initial version should support:
-
-| Database   | Dump Tool   |
-| ---------- | ----------- |
-| PostgreSQL | `pg_dump`   |
-| MySQL      | `mysqldump` |
-| MongoDB    | `mongodump` |
-
-MVP should begin with **PostgreSQL support only**.
-
----
-
-# Storage Provider
-
-Primary storage provider:
-
 ```
-S3-compatible object storage
+Starting backup
+
+Dumping database... done
+Compressing... done
+Uploading to storage... done
+
+Backup complete
+s3://prod-backups/backfup/app/2026-03-12-14-20-00.sql.gz
 ```
 
-Examples:
+### 5. Explore your data
 
-* AWS S3
-* Cloudflare R2
-* MinIO
-* DigitalOcean Spaces
-* Wasabi
-
-The user supplies an **endpoint URL**, not a provider name.
-
-Example endpoints:
-
-AWS
-
-```
-https://s3.amazonaws.com
+```bash
+backfup studio app
 ```
 
-Cloudflare R2
-
 ```
-https://<account>.r2.cloudflarestorage.com
-```
-
-MinIO
-
-```
-http://localhost:9000
+  backfup studio → http://127.0.0.1:4242
+  database        → app
+  press Ctrl+C to stop
 ```
 
 ---
 
-# Project Directory
+## Commands
 
-When initialized, the project contains:
+### `backfup init`
 
-```
-.backfup/
-   config.json
-```
+Configures S3-compatible storage. Supports interactive and non-interactive modes.
 
-This directory stores all backup configuration.
-
----
-
-# Configuration Format
-
-Example configuration file:
-
-```json
-{
-  "storage": {
-    "type": "s3",
-    "endpoint": "https://s3.amazonaws.com",
-    "bucket": "prod-backups",
-    "region": "us-east-1",
-    "accessKey": {
-      "fromEnv": "BACKFUP_ACCESS_KEY"
-    },
-    "secretKey": {
-      "fromEnv": "BACKFUP_SECRET_KEY"
-    }
-  },
-  "databases": [
-    {
-      "name": "app",
-      "type": "postgres",
-      "connectionString": {
-        "fromEnv": "DATABASE_URL"
-      }
-    }
-  ]
-}
-```
-
-Sensitive values should preferably reference environment variables.
+| Flag | Description |
+|---|---|
+| `--endpoint` | S3 endpoint URL |
+| `--bucket` | Bucket name |
+| `--region` | Region |
+| `--access-key` | Direct access key |
+| `--secret-key` | Direct secret key |
+| `--from-env` | Read credentials from environment variables |
+| `--access-key-env` | Env var name for access key (use with `--from-env`) |
+| `--secret-key-env` | Env var name for secret key (use with `--from-env`) |
+| `--force` | Overwrite existing configuration |
 
 ---
 
-# Backup Storage Structure
+### `backfup add <connection-url>`
 
-Backups are stored in the following path format:
+Registers a database for backup and studio access.
+
+```bash
+backfup add postgres://user:pass@localhost:5432/app --name app
+backfup add --name app --from-env DATABASE_URL
+```
+
+| Flag | Description |
+|---|---|
+| `--name` | Alias for this database (auto-generated if omitted) |
+| `--from-env` | Read connection URL from this environment variable |
+| `--force` | Overwrite existing entry with the same name |
+
+If `--name` is not provided, a random 6-character case-sensitive ID is assigned (e.g. `aB3kXz`).
+
+---
+
+### `backfup test`
+
+Verifies your configuration is working.
+
+```bash
+backfup test --storage        # tests S3 connectivity and write permissions
+backfup test --database app   # tests database connection and pg_dump availability
+backfup test --storage --database app   # runs both
+```
+
+---
+
+### `backfup backup <name>`
+
+Runs a full backup: dump → gzip → upload.
+
+```bash
+backfup backup app
+```
+
+Backups are stored at:
 
 ```
 <bucket>/backfup/<database>/<timestamp>.sql.gz
@@ -198,442 +195,152 @@ Backups are stored in the following path format:
 Example:
 
 ```
-prod-backups/backfup/app/2026-03-11-14-20-00.sql.gz
+prod-backups/backfup/app/2026-03-12-14-20-00.sql.gz
 ```
 
-Timestamp format:
-
-```
-YYYY-MM-DD-HH-MM-SS
-```
-
-This ensures backups remain naturally sortable.
+Timestamps follow `YYYY-MM-DD-HH-MM-SS` for natural sort order.
 
 ---
 
-# CLI Commands
+### `backfup list <name>`
 
-## Initialize configuration
+Lists all backups stored for a database.
 
+```bash
+backfup list app
 ```
-backfup init
-```
-
-Creates `.backfup/config.json`.
-
-Supports **interactive and non-interactive modes**.
-
----
-
-### Interactive example
-
-```
-backfup init
-```
-
-Prompts:
-
-```
-S3 endpoint URL
-Bucket name
-Region
-Credential method
-```
-
----
-
-### Non-interactive example
-
-```
-backfup init \
-  --endpoint https://s3.amazonaws.com \
-  --bucket prod-backups \
-  --region us-east-1 \
-  --access-key-env BACKFUP_ACCESS_KEY \
-  --secret-key-env BACKFUP_SECRET_KEY
-```
-
-Flags supported:
-
-| Flag               | Description                     |
-| ------------------ | ------------------------------- |
-| `--endpoint`       | S3 endpoint                     |
-| `--bucket`         | storage bucket                  |
-| `--region`         | storage region                  |
-| `--access-key`     | direct credential               |
-| `--secret-key`     | direct credential               |
-| `--access-key-env` | env reference                   |
-| `--secret-key-env` | env reference                   |
-| `--use-aws-env`    | use AWS environment credentials |
-| `--force`          | overwrite existing config       |
-
----
-
-## Add database
-
-Registers a database to backup.
-
-```
-backfup add --name <name> <connection-string>
-```
-
-Example:
-
-```
-backfup add --name app postgres://user:pass@localhost:5432/app
-```
-
-Environment variable alternative:
-
-```
-backfup add --name app --from-env DATABASE_URL
-```
-
----
-
-## Test configuration
-
-```
-backfup test <database>
-```
-
-Checks:
-
-* database connection
-* required dump tool availability
-* storage access
-
-Example output:
-
-```
-Connecting to database
-Connection successful
-
-Checking pg_dump
-Found
-
-Checking storage access
-Upload test successful
-```
-
----
-
-## Run backup
-
-Creates a new backup.
-
-```
-backfup backup <database>
-```
-
-Process:
-
-1. run database dump
-2. compress backup
-3. upload to storage
-4. display results
-
-Example:
-
-```
-Starting backup
-
-Dumping database
-Compressing backup
-Uploading to storage
-
-Backup completed
-
-Location:
-s3://prod-backups/backfup/app/2026-03-11-14-20.sql.gz
-```
-
----
-
-## List backups
-
-```
-backfup list <database>
-```
-
-Displays all backups stored for that database.
-
-Example output:
 
 ```
 Available backups
 
-1. 2026-03-11 14:20
-2. 2026-03-10 03:00
-3. 2026-03-09 03:00
+1. 2026-03-12 14:20
+2. 2026-03-11 03:00
+3. 2026-03-10 03:00
 ```
 
 ---
 
-## Restore backup
+### `backfup restore <name>`
 
-Restores a selected backup.
+Downloads and restores a selected backup.
 
+```bash
+backfup restore app
 ```
-backfup restore <database>
-```
-
-Example:
 
 ```
 Select backup
 
-1) 2026-03-11
-2) 2026-03-10
-3) 2026-03-09
-```
-
-The selected backup is downloaded and restored.
-
----
-
-# Internal Backup Pipeline
-
-The backup pipeline follows:
-
-```
-database dump
-→ gzip compression
-→ upload to storage
-```
-
-Conceptually:
-
-```
-pg_dump → gzip → S3 upload
-```
-
-Streaming should be used when possible to avoid writing large temporary files.
-
----
-
-# System Requirements
-
-Required database tools must exist on the system.
-
-For PostgreSQL:
-
-```
-pg_dump
-psql
-```
-
-For MySQL:
-
-```
-mysqldump
-mysql
-```
-
-For MongoDB:
-
-```
-mongodump
-mongorestore
-```
-
-The CLI should detect missing tools and fail early.
-
----
-
-# User Flows
-
-## Flow 1 — Initial setup
-
-Developer installs `backfup`.
-
-Run:
-
-```
-backfup init
-```
-
-Configure storage.
-
-Configuration file is created.
-
----
-
-## Flow 2 — Register database
-
-Developer has a connection string.
-
-Example:
-
-```
-DATABASE_URL=postgres://user:pass@localhost:5432/app
-```
-
-Command:
-
-```
-backfup add --name app "$DATABASE_URL"
-```
-
-Database is saved in config.
-
----
-
-## Flow 3 — Verify configuration
-
-Developer runs:
-
-```
-backfup test app
-```
-
-System verifies connectivity and storage access.
-
----
-
-## Flow 4 — Create backup
-
-Before running migrations:
-
-```
-backfup backup app
-```
-
-Backup is uploaded to storage.
-
----
-
-## Flow 5 — View backups
-
-Developer checks available backups:
-
-```
-backfup list app
-```
-
-Backup history is displayed.
-
----
-
-## Flow 6 — Restore backup
-
-If a migration fails:
-
-```
-backfup restore app
-```
-
-Developer selects a backup and restores the database.
-
----
-
-# Error Handling
-
-Examples:
-
-### Missing dump tool
-
-```
-Error: pg_dump not found
-Install PostgreSQL client tools
-```
-
-### Missing environment variable
-
-```
-Error: DATABASE_URL environment variable not set
-```
-
-### Storage connection failure
-
-```
-Error: unable to connect to storage endpoint
+1) 2026-03-12 14:20
+2) 2026-03-11 03:00
+3) 2026-03-10 03:00
 ```
 
 ---
 
-# MVP Scope
+### `backfup studio <name>`
 
-The first version should support:
+Launches a local browser-based database explorer.
 
-Commands:
-
-```
-init
-add
-test
-backup
-list
-restore
+```bash
+backfup studio app
+backfup studio app --port 8080
 ```
 
-Database:
+| Flag | Description |
+|---|---|
+| `--port` | Port to bind to (default: `4242`) |
+| `--host` | Host to bind to (default: `127.0.0.1`) |
 
-```
-PostgreSQL
+**Features:**
+- Table browser with row counts
+- Per-column filtering with 300ms debounce
+- Sort by any column
+- Row detail panel with full field values
+- Foreign key navigation — click to follow relationships
+- JSON column rendering
+- Raw SQL editor with query history (`⌘↵` to run)
+- Schema diagram (ERD) inferred from foreign keys
+- Global search across all tables
+- CSV export with active filters applied
+
+---
+
+## Configuration
+
+`backfup` stores all configuration at `~/.backfup/config.yaml`.
+
+```yaml
+storage:
+  endpoint: http://localhost:9000
+  bucket: backfup-dev
+  region: us-east-1
+  access_key: ENV("BACKFUP_ACCESS_KEY")
+  secret_key: ENV("BACKFUP_SECRET_KEY")
+
+databases:
+  - name: app
+    type: postgres
+    connection_url: ENV("DATABASE_URL")
 ```
 
-Storage:
+Values wrapped in `ENV("...")` are resolved from the environment at runtime — the actual secrets never touch disk.
 
+---
+
+## Storage providers
+
+Any S3-compatible endpoint works. Supply the endpoint URL directly — no provider-specific configuration needed.
+
+| Provider | Endpoint format |
+|---|---|
+| AWS S3 | `https://s3.amazonaws.com` |
+| Cloudflare R2 | `https://<account>.r2.cloudflarestorage.com` |
+| MinIO | `http://localhost:9000` |
+| DigitalOcean Spaces | `https://<region>.digitaloceanspaces.com` |
+| Wasabi | `https://s3.<region>.wasabisys.com` |
+
+---
+
+## Local development setup
+
+A ready-to-use `docker-compose.yml` is included for local development with MinIO and PostgreSQL:
+
+```bash
+docker compose up
 ```
-S3-compatible endpoint
+
+Then:
+
+```bash
+backfup init \
+  --endpoint http://localhost:9000 \
+  --bucket backfup-dev \
+  --region us-east-1 \
+  --access-key minioadmin \
+  --secret-key minioadmin
+
+backfup add postgres://backfup:backfup@localhost:5432/appdb --name appdb
+backfup test --storage --database appdb
+backfup studio appdb
 ```
 
 ---
 
-# Future Features
+## Supported databases
 
-Possible extensions:
-
-### Scheduled backups
-
-```
-backfup schedule app daily
-```
-
-### Retention policies
-
-```
-keep last 7 backups
-```
-
-### Encryption
-
-Client-side encrypted backups.
-
-### Multi-database backups
-
-```
-backfup backup --all
-```
-
-### Backup metadata
-
-Include metadata such as:
-
-* backup size
-* timestamp
-* database type
+| Database | Dump tool | Status |
+|---|---|---|
+| PostgreSQL | `pg_dump` / `psql` | ✅ MVP |
+| MySQL | `mysqldump` / `mysql` | Planned |
+| MongoDB | `mongodump` / `mongorestore` | Planned |
 
 ---
 
-# Intended Outcome
+## Roadmap
 
-`backfup` replaces workflows like:
-
-```
-cron
-pg_dump
-gzip
-aws s3 cp
-```
-
-with a single unified interface:
-
-```
-backfup add "$DATABASE_URL"
-backfup backup
-backfup restore
-```
-
-The tool focuses on **speed, reliability, and minimal configuration**, making database backups accessible for developers without maintaining custom scripts.
+- Scheduled backups (`backfup schedule app daily`)
+- Retention policies (keep last N backups)
+- Client-side encryption
+- Multi-database backup (`backfup backup --all`)
+- Backup metadata (size, duration, row count)
