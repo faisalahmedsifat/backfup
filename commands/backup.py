@@ -13,6 +13,7 @@ from loguru import logger
 
 from config.store import ConfigStore
 from utils.credentials import resolve_credential
+from commands.add import _generate_id
 
 # S3 multipart minimum part size is 5MB — use 6MB to stay safely above
 CHUNK_SIZE = 6 * 1024 * 1024
@@ -73,13 +74,18 @@ def _stream_to_s3(
     client,
     bucket: str,
     key: str,
+    backup_id: str,
     compress: bool = True,
 ) -> int:
     """
     Read from process stdout, optionally gzip-compress, and upload to S3
     via multipart upload. Returns total bytes uploaded.
     """
-    mpu = client.create_multipart_upload(Bucket=bucket, Key=key)
+    mpu = client.create_multipart_upload(
+        Bucket=bucket,
+        Key=key,
+        Metadata={"backfup-id": backup_id}
+    )
     upload_id = mpu["UploadId"]
     parts = []
     part_number = 1
@@ -187,6 +193,7 @@ def backup_command(
     bucket = storage["bucket"]
 
     timestamp = datetime.now(timezone.utc).strftime(TIMESTAMP_FORMAT)
+    backup_id = _generate_id()
     key = _s3_key(name, timestamp)
 
     # MongoDB uses its own gzip via --archive --gzip, others we compress ourselves
@@ -195,6 +202,7 @@ def backup_command(
     typer.echo(f"Starting backup\n")
     typer.echo(f"  database  → {name} ({db_type})")
     typer.echo(f"  storage   → {storage['endpoint']} / {bucket}")
+    typer.echo(f"  id        → {backup_id}")
     typer.echo(f"  key       → {key}\n")
 
     # Step 1: start dump process
@@ -210,7 +218,7 @@ def backup_command(
     typer.echo("Compressing and uploading...", nl=False)
     client = _get_s3_client(storage)
 
-    size_bytes = _stream_to_s3(process, client, bucket, key, compress=compress)
+    size_bytes = _stream_to_s3(process, client, bucket, key, backup_id=backup_id, compress=compress)
     size_kb = size_bytes / 1024
 
     typer.echo(" done")
