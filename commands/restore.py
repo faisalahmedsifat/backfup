@@ -23,9 +23,25 @@ def _get_s3_client(storage: dict):
     )
 
 
+def _resolve_backup(backups: list, choice: str) -> Optional[dict]:
+    """Accept either a backup ID (e.g. aB3kXz) or a list number (e.g. 1)."""
+    # Try as ID first
+    by_id = next((b for b in backups if b["id"] == choice), None)
+    if by_id:
+        return by_id
+    # Try as integer index
+    try:
+        index = int(choice)
+        if 1 <= index <= len(backups):
+            return backups[index - 1]
+    except ValueError:
+        pass
+    return None
+
+
 def restore_command(
     name: str = typer.Argument(..., help="Database name as registered with `backfup add`"),
-    id: Optional[str] = typer.Option(None, "--id", help="Backup ID to restore. Omit to select interactively."),
+    id: Optional[str] = typer.Option(None, "--id", help="Backup ID to restore directly (skips interactive selection)."),
 ):
     store = ConfigStore()
 
@@ -55,18 +71,19 @@ def restore_command(
         backup = next((b for b in backups if b["id"] == id), None)
         if not backup:
             typer.echo(f"No backup found with id '{id}'.")
-            typer.echo(f"Run `backfup backup list {name}` to see available backups.")
+            typer.echo(f"Run `backfup backup {name} list` to see available backups.")
             raise typer.Exit(1)
     else:
         typer.echo(f"Select a backup to restore for '{name}'\n")
         for i, b in enumerate(backups, start=1):
             typer.echo(f"  {i}) [{b['id']}]  {b['timestamp']}")
         typer.echo("")
-        choice = typer.prompt("Enter number", type=int)
-        if choice < 1 or choice > len(backups):
-            typer.echo("Invalid selection.")
+
+        raw = typer.prompt("Enter number or ID")
+        backup = _resolve_backup(backups, raw)
+        if not backup:
+            typer.echo(f"Invalid selection '{raw}'. Enter a list number or a backup ID.")
             raise typer.Exit(1)
-        backup = backups[choice - 1]
 
     db_type = db.get("type", "postgres")
     connection_url = resolve_credential(db["connection_url"])
