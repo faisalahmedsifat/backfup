@@ -2,16 +2,45 @@ import random
 import string
 import typer
 from typing import Optional
+from urllib.parse import urlparse
 
 from config.store import ConfigStore
-from utils.credentials import encode_env_ref
+from utils.credentials import encode_env_ref, resolve_credential
 
+
+# ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def _generate_id(length: int = 6) -> str:
     """Generate a random case-sensitive alphanumeric ID."""
-    charset = string.ascii_letters + string.digits  # a-z, A-Z, 0-9
+    charset = string.ascii_letters + string.digits
     return "".join(random.choices(charset, k=length))
 
+
+def _detect_db_type(connection_url: str) -> str:
+    """
+    Infer database type from the connection URL scheme.
+    Raises ValueError if the scheme is unrecognized.
+    """
+    scheme = urlparse(connection_url).scheme.lower()
+
+    mapping = {
+        "postgres":    "postgres",
+        "postgresql":  "postgres",
+        "mysql":       "mysql",
+        "mongodb":     "mongodb",
+        "mongodb+srv": "mongodb",
+    }
+
+    db_type = mapping.get(scheme)
+    if not db_type:
+        raise ValueError(
+            f"Unrecognized connection URL scheme '{scheme}'. "
+            "Supported: postgres://, mysql://, mongodb://"
+        )
+    return db_type
+
+
+# ─── Command ──────────────────────────────────────────────────────────────────
 
 def add_command(
     connection_url: Optional[str] = typer.Argument(
@@ -43,6 +72,15 @@ def add_command(
         typer.echo("A connection URL is required. Pass it as an argument or use --from-env DATABASE_URL.")
         raise typer.Exit(1)
 
+    # Resolve the URL now only to detect the type — even if it will be stored as ENV("...")
+    raw_url = resolve_credential(f'ENV("{from_env}")') if from_env else connection_url
+
+    try:
+        db_type = _detect_db_type(raw_url)
+    except ValueError as e:
+        typer.echo(f"Error: {e}")
+        raise typer.Exit(1)
+
     store = ConfigStore()
     config = store.load() if store.exists() else {}
 
@@ -63,11 +101,9 @@ def add_command(
 
     entry = {
         "name": name,
-        "type": "postgres",  #
+        "type": db_type,
         "connection_url": stored_connection_url,
     }
-
-    # TODO: detect database type from connection URL prefix (postgres://, mysql://, mongodb://)
 
     # Replace existing entry or append
     if existing:
@@ -76,4 +112,4 @@ def add_command(
         config.setdefault("databases", []).append(entry)
 
     store.save(config)
-    typer.echo(f"Database '{name}' added successfully.")
+    typer.echo(f"Database '{name}' added successfully ({db_type}).")

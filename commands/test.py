@@ -36,7 +36,6 @@ def _test_storage(config: dict):
     bucket = storage_config["bucket"]
     typer.echo(f"Testing storage: {storage_config['endpoint']} / {bucket}\n")
 
-    # Step 1: resolve credentials
     typer.echo("Resolving credentials...", nl=False)
     try:
         client = _get_s3_client(storage_config)
@@ -45,7 +44,6 @@ def _test_storage(config: dict):
         typer.echo(f" FAILED\nError: environment variable {e} is not set.")
         raise typer.Exit(1)
 
-    # Step 2: verify bucket access
     typer.echo("Checking bucket access...", nl=False)
     try:
         client.head_bucket(Bucket=bucket)
@@ -63,7 +61,6 @@ def _test_storage(config: dict):
         typer.echo(f" FAILED\nError: could not connect to endpoint — {e}")
         raise typer.Exit(1)
 
-    # Step 3: verify write permissions via probe upload
     typer.echo("Checking write permissions...", nl=False)
     try:
         client.put_object(Bucket=bucket, Key=PROBE_KEY, Body=PROBE_CONTENT)
@@ -72,7 +69,6 @@ def _test_storage(config: dict):
         typer.echo(f" FAILED\nError: {e}")
         raise typer.Exit(1)
 
-    # Step 4: clean up probe file
     typer.echo("Cleaning up probe file...", nl=False)
     try:
         client.delete_object(Bucket=bucket, Key=PROBE_KEY)
@@ -83,32 +79,20 @@ def _test_storage(config: dict):
     typer.echo("\nStorage is configured correctly.")
 
 
-def _test_database(config: dict, name: str):
-    databases = config.get("databases", [])
-    db = next((d for d in databases if d["name"] == name), None)
+# ─── Per-engine test implementations ─────────────────────────────────────────
 
-    if not db:
-        typer.echo(f"Database '{name}' not found. Run `backfup add` first.")
-        raise typer.Exit(1)
-
-    connection_url = resolve_credential(db["connection_url"])
-    typer.echo(f"Testing database: {name}\n")
-
-    # Step 1: check psql is available
+def _test_postgres(connection_url: str):
     typer.echo("Checking pg_dump availability...", nl=False)
     if not shutil.which("pg_dump"):
         typer.echo(" FAILED\nError: pg_dump not found. Install PostgreSQL client tools.")
         raise typer.Exit(1)
     typer.echo(" OK")
 
-    # Step 2: attempt a real connection
     typer.echo("Connecting to database...", nl=False)
     try:
         result = subprocess.run(
             ["psql", connection_url, "-c", "SELECT 1"],
-            capture_output=True,
-            text=True,
-            timeout=10,
+            capture_output=True, text=True, timeout=10,
         )
         if result.returncode != 0:
             typer.echo(f" FAILED\nError: {result.stderr.strip()}")
@@ -121,15 +105,91 @@ def _test_database(config: dict, name: str):
         typer.echo(" FAILED\nError: connection timed out.")
         raise typer.Exit(1)
 
+
+def _test_mongodb(connection_url: str):
+    typer.echo("Checking pymongo availability...", nl=False)
+    try:
+        import pymongo
+        typer.echo(" OK")
+    except ImportError:
+        typer.echo(" FAILED\nError: pymongo not installed. Run: uv add pymongo")
+        raise typer.Exit(1)
+
+    typer.echo("Connecting to database...", nl=False)
+    try:
+        client = pymongo.MongoClient(connection_url, serverSelectionTimeoutMS=5000)
+        client.admin.command("ping")
+        client.close()
+        typer.echo(" OK")
+    except Exception as e:
+        typer.echo(f" FAILED\nError: {e}")
+        raise typer.Exit(1)
+
+
+def _test_mysql(connection_url: str):
+    typer.echo("Checking mysqldump availability...", nl=False)
+    if not shutil.which("mysqldump"):
+        typer.echo(" FAILED\nError: mysqldump not found. Install MySQL client tools.")
+        raise typer.Exit(1)
+    typer.echo(" OK")
+
+    typer.echo("Connecting to database...", nl=False)
+    try:
+        result = subprocess.run(
+            ["mysql", "--connect-timeout=10", connection_url, "-e", "SELECT 1"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            typer.echo(f" FAILED\nError: {result.stderr.strip()}")
+            raise typer.Exit(1)
+        typer.echo(" OK")
+    except FileNotFoundError:
+        typer.echo(" FAILED\nError: mysql not found. Install MySQL client tools.")
+        raise typer.Exit(1)
+    except subprocess.TimeoutExpired:
+        typer.echo(" FAILED\nError: connection timed out.")
+        raise typer.Exit(1)
+
+
+# ─── Dispatcher ───────────────────────────────────────────────────────────────
+
+_DB_TESTERS = {
+    "postgres": _test_postgres,
+    "mongodb":  _test_mongodb,
+    "mysql":    _test_mysql,
+}
+
+
+def _test_database(config: dict, name: str):
+    databases = config.get("databases", [])
+    db = next((d for d in databases if d["name"] == name), None)
+
+    if not db:
+        typer.echo(f"Database '{name}' not found. Run `backfup add` first.")
+        raise typer.Exit(1)
+
+    db_type = db.get("type", "postgres")
+    connection_url = resolve_credential(db["connection_url"])
+
+    typer.echo(f"Testing database: {name} ({db_type})\n")
+
+    tester = _DB_TESTERS.get(db_type)
+    if not tester:
+        typer.echo(f"Error: unsupported database type '{db_type}'.")
+        raise typer.Exit(1)
+
+    tester(connection_url)
     typer.echo(f"\nDatabase '{name}' is reachable.")
 
+
+# ─── Command ──────────────────────────────────────────────────────────────────
 
 def test_command(
     storage: bool = typer.Option(False, "--storage", help="Test storage connectivity and permissions"),
     database: Optional[str] = typer.Option(None, "--database", help="Test database connection by name (e.g. appdb)"),
 ):
     if not storage and not database:
-        typer.echo("Specify what to test. Available options: --storage, --database <name>")
+        typer.echo("Specify what to test. Available options: --storage, --database <n>")
         raise typer.Exit(1)
 
     store = ConfigStore()
@@ -145,5 +205,5 @@ def test_command(
 
     if database:
         if storage:
-            typer.echo("")  # blank line between sections
+            typer.echo("")
         _test_database(config, database)
