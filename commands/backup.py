@@ -1,26 +1,26 @@
 import gzip
+import random
 import shutil
+import string
 import subprocess
-import threading
 from datetime import datetime, timezone
 from io import BytesIO
-from typing import Optional
 
 import boto3
 import typer
 from botocore.exceptions import ClientError
-from loguru import logger
 
 from config.store import ConfigStore
 from utils.credentials import resolve_credential
-from commands.add import _generate_id
 
-# S3 multipart minimum part size is 5MB — use 6MB to stay safely above
 CHUNK_SIZE = 6 * 1024 * 1024
 TIMESTAMP_FORMAT = "%Y-%m-%d-%H-%M-%S"
 
 
-# ─── S3 helpers ───────────────────────────────────────────────────────────────
+def _generate_id(length: int = 6) -> str:
+    charset = string.ascii_letters + string.digits
+    return "".join(random.choices(charset, k=length))
+
 
 def _get_s3_client(storage: dict):
     return boto3.client(
@@ -36,8 +36,6 @@ def _s3_key(db_name: str, timestamp: str) -> str:
     return f"backfup/{db_name}/{timestamp}.sql.gz"
 
 
-# ─── Dump commands ────────────────────────────────────────────────────────────
-
 def _start_dump(db: dict, connection_url: str) -> subprocess.Popen:
     db_type = db.get("type", "postgres")
 
@@ -51,7 +49,6 @@ def _start_dump(db: dict, connection_url: str) -> subprocess.Popen:
         if not shutil.which("mongodump"):
             typer.echo("Error: mongodump not found. Install MongoDB Database Tools.")
             raise typer.Exit(1)
-        # mongodump streams to stdout with --archive flag
         cmd = ["mongodump", f"--uri={connection_url}", "--archive", "--gzip"]
 
     elif db_type == "mysql":
@@ -67,24 +64,9 @@ def _start_dump(db: dict, connection_url: str) -> subprocess.Popen:
     return subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
-# ─── Streaming upload ─────────────────────────────────────────────────────────
-
-def _stream_to_s3(
-    process: subprocess.Popen,
-    client,
-    bucket: str,
-    key: str,
-    backup_id: str,
-    compress: bool = True,
-) -> int:
-    """
-    Read from process stdout, optionally gzip-compress, and upload to S3
-    via multipart upload. Returns total bytes uploaded.
-    """
+def _stream_to_s3(process, client, bucket, key, backup_id, compress=True) -> int:
     mpu = client.create_multipart_upload(
-        Bucket=bucket,
-        Key=key,
-        Metadata={"backfup-id": backup_id}
+        Bucket=bucket, Key=key, Metadata={"backfup-id": backup_id}
     )
     upload_id = mpu["UploadId"]
     parts = []
@@ -93,11 +75,7 @@ def _stream_to_s3(
 
     try:
         buffer = BytesIO()
-
-        if compress:
-            gz = gzip.GzipFile(fileobj=buffer, mode="wb")
-        else:
-            gz = None
+        gz = gzip.GzipFile(fileobj=buffer, mode="wb") if compress else None
 
         def flush_part():
             nonlocal part_number, total_bytes
@@ -106,11 +84,8 @@ def _stream_to_s3(
             if not data:
                 return
             response = client.upload_part(
-                Bucket=bucket,
-                Key=key,
-                UploadId=upload_id,
-                PartNumber=part_number,
-                Body=data,
+                Bucket=bucket, Key=key, UploadId=upload_id,
+                PartNumber=part_number, Body=data,
             )
             parts.append({"PartNumber": part_number, "ETag": response["ETag"]})
             total_bytes += len(data)
@@ -122,21 +97,16 @@ def _stream_to_s3(
             chunk = process.stdout.read(CHUNK_SIZE)
             if not chunk:
                 break
-
             if gz:
                 gz.write(chunk)
                 gz.flush()
             else:
                 buffer.write(chunk)
-
             if buffer.tell() >= CHUNK_SIZE:
                 flush_part()
 
-        # Finalise gzip stream
         if gz:
             gz.close()
-
-        # Flush remaining data — S3 allows the last part to be < 5MB
         if buffer.tell() > 0:
             flush_part()
 
@@ -149,9 +119,7 @@ def _stream_to_s3(
             raise typer.Exit(1)
 
         client.complete_multipart_upload(
-            Bucket=bucket,
-            Key=key,
-            UploadId=upload_id,
+            Bucket=bucket, Key=key, UploadId=upload_id,
             MultipartUpload={"Parts": parts},
         )
         return total_bytes
@@ -162,9 +130,7 @@ def _stream_to_s3(
         raise typer.Exit(1)
 
 
-# ─── Command ──────────────────────────────────────────────────────────────────
-
-def backup_command(
+def backup_run_command(
     name: str = typer.Argument(..., help="Database name as registered with `backfup add`"),
 ):
     store = ConfigStore()
@@ -175,14 +141,12 @@ def backup_command(
 
     config = store.load()
 
-    # Resolve database
     databases = config.get("databases", [])
     db = next((d for d in databases if d["name"] == name), None)
     if not db:
         typer.echo(f"Database '{name}' not found. Run `backfup add` first.")
         raise typer.Exit(1)
 
-    # Resolve storage
     storage = config.get("storage")
     if not storage:
         typer.echo("No storage configured. Run `backfup init` first.")
@@ -195,17 +159,14 @@ def backup_command(
     timestamp = datetime.now(timezone.utc).strftime(TIMESTAMP_FORMAT)
     backup_id = _generate_id()
     key = _s3_key(name, timestamp)
-
-    # MongoDB uses its own gzip via --archive --gzip, others we compress ourselves
     compress = db_type != "mongodb"
 
-    typer.echo(f"Starting backup\n")
+    typer.echo("Starting backup\n")
     typer.echo(f"  database  → {name} ({db_type})")
     typer.echo(f"  storage   → {storage['endpoint']} / {bucket}")
     typer.echo(f"  id        → {backup_id}")
     typer.echo(f"  key       → {key}\n")
 
-    # Step 1: start dump process
     typer.echo("Dumping database...", nl=False)
     try:
         process = _start_dump(db, connection_url)
@@ -214,19 +175,13 @@ def backup_command(
         typer.echo(f" FAILED\nError: {e}")
         raise typer.Exit(1)
 
-    # Step 2 + 3: compress and stream to S3 simultaneously
     typer.echo("Compressing and uploading...", nl=False)
     client = _get_s3_client(storage)
-
     size_bytes = _stream_to_s3(process, client, bucket, key, backup_id=backup_id, compress=compress)
     size_kb = size_bytes / 1024
-
     typer.echo(" done")
 
-    typer.echo(f"""
-Backup complete
-
-  location  → s3://{bucket}/{key}
-  size      → {size_kb:.1f} KB
-  timestamp → {timestamp}
-""")
+    typer.echo(f"\nBackup complete\n")
+    typer.echo(f"  location  → s3://{bucket}/{key}")
+    typer.echo(f"  size      → {size_kb:.1f} KB")
+    typer.echo(f"  timestamp → {timestamp}\n")

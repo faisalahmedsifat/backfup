@@ -36,10 +36,12 @@ pip install backfup
 | Feature | Requires |
 |---|---|
 | PostgreSQL backup/restore | `pg_dump`, `psql` on PATH |
+| MongoDB backup/restore | `mongodump`, `mongorestore` on PATH |
+| MySQL backup/restore | `mysqldump`, `mysql` on PATH |
 | Studio | `fastapi`, `uvicorn`, `psycopg2-binary` |
 
 ```bash
-uv add fastapi uvicorn psycopg2-binary
+uv add fastapi uvicorn psycopg2-binary pymongo
 ```
 
 ---
@@ -83,6 +85,8 @@ storage:
 backfup add postgres://user:pass@localhost:5432/mydb --name app
 ```
 
+Database type is auto-detected from the connection URL scheme — `postgres://`, `mysql://`, `mongodb://`.
+
 Or via environment variable:
 
 ```bash
@@ -105,12 +109,19 @@ backfup backup app
 ```
 Starting backup
 
-Dumping database... done
-Compressing... done
-Uploading to storage... done
+  database  → app (postgres)
+  storage   → https://s3.amazonaws.com / prod-backups
+  id        → aB3kXz
+  key       → backfup/app/2026-03-12-14-20-00.sql.gz
+
+Dumping database... started
+Compressing and uploading... done
 
 Backup complete
-s3://prod-backups/backfup/app/2026-03-12-14-20-00.sql.gz
+
+  location  → s3://prod-backups/backfup/app/2026-03-12-14-20-00.sql.gz
+  size      → 142.3 KB
+  timestamp → 2026-03-12-14-20-00
 ```
 
 ### 5. Explore your data
@@ -149,10 +160,11 @@ Configures S3-compatible storage. Supports interactive and non-interactive modes
 
 ### `backfup add <connection-url>`
 
-Registers a database for backup and studio access.
+Registers a database for backup and studio access. Database type is auto-detected from the URL scheme.
 
 ```bash
 backfup add postgres://user:pass@localhost:5432/app --name app
+backfup add mongodb://user:pass@localhost:27017/app?authSource=admin --name mongo
 backfup add --name app --from-env DATABASE_URL
 ```
 
@@ -166,13 +178,37 @@ If `--name` is not provided, a random 6-character case-sensitive ID is assigned 
 
 ---
 
+### `backfup list`
+
+Lists all registered databases.
+
+```bash
+backfup list
+```
+
+```
+Registered databases
+
+  app
+    type  → postgres
+    url   → postgres://user:***@localhost:5432/app
+
+  mongo
+    type  → mongodb
+    url   → mongodb://user:***@localhost:27017/app?authSource=admin
+
+  2 database(s) total
+```
+
+---
+
 ### `backfup test`
 
 Verifies your configuration is working.
 
 ```bash
-backfup test --storage        # tests S3 connectivity and write permissions
-backfup test --database app   # tests database connection and pg_dump availability
+backfup test --storage              # tests S3 connectivity and write permissions
+backfup test --database app         # tests database connection and dump tool availability
 backfup test --storage --database app   # runs both
 ```
 
@@ -180,7 +216,7 @@ backfup test --storage --database app   # runs both
 
 ### `backfup backup <name>`
 
-Runs a full backup: dump → gzip → upload.
+Runs a full backup: dump → gzip → upload. Each backup gets a unique short ID alongside its timestamp.
 
 ```bash
 backfup backup app
@@ -198,42 +234,80 @@ Example:
 prod-backups/backfup/app/2026-03-12-14-20-00.sql.gz
 ```
 
-Timestamps follow `YYYY-MM-DD-HH-MM-SS` for natural sort order.
+Timestamps follow `YYYY-MM-DD-HH-MM-SS` for natural sort order. The backup ID (e.g. `aB3kXz`) is stored as S3 object metadata and used for direct restore.
 
 ---
 
-### `backfup list <name>`
+### `backfup backup list <name>`
 
 Lists all backups stored for a database.
 
 ```bash
-backfup list app
+backfup backup list app
 ```
 
 ```
-Available backups
+Available backups for 'app'
 
-1. 2026-03-12 14:20
-2. 2026-03-11 03:00
-3. 2026-03-10 03:00
+  1) [aB3kXz]  2026-03-12 14:20:00 UTC  (142.3 KB)
+  2) [mQ7pXr]  2026-03-11 03:00:00 UTC  (138.1 KB)
+  3) [xR2nWs]  2026-03-10 03:00:00 UTC  (135.7 KB)
+
+  3 backup(s) total
 ```
 
 ---
 
 ### `backfup restore <name>`
 
-Downloads and restores a selected backup.
+Downloads and restores a backup. Pass `--id` to restore directly, or omit it to select interactively.
 
 ```bash
-backfup restore app
+backfup restore app --id aB3kXz     # direct restore by ID
+backfup restore app                  # interactive selection
 ```
 
 ```
-Select backup
+Select a backup to restore for 'app'
 
-1) 2026-03-12 14:20
-2) 2026-03-11 03:00
-3) 2026-03-10 03:00
+  1) [aB3kXz]  2026-03-12 14:20:00 UTC
+  2) [mQ7pXr]  2026-03-11 03:00:00 UTC
+
+Enter number: 1
+
+Downloading... done
+Restoring... done
+
+Restore complete.
+```
+
+| Flag | Description |
+|---|---|
+| `--id` | Backup ID to restore directly (from `backfup backup list`) |
+
+---
+
+### `backfup storage list`
+
+Shows storage configuration and a summary of all backups in the bucket grouped by database.
+
+```bash
+backfup storage list
+```
+
+```
+Storage configuration
+
+  endpoint  → http://localhost:9000
+  bucket    → backfup-dev
+  region    → us-east-1
+
+Bucket contents
+
+  app/      (3 backup(s), 416.1 KB)
+  mongo/    (1 backup(s), 28.4 KB)
+
+  total → 444.5 KB across 2 database(s)
 ```
 
 ---
@@ -282,6 +356,9 @@ databases:
   - name: app
     type: postgres
     connection_url: ENV("DATABASE_URL")
+  - name: mongo
+    type: mongodb
+    connection_url: mongodb://backfup:backfup@localhost:27017/appdb?authSource=admin
 ```
 
 Values wrapped in `ENV("...")` are resolved from the environment at runtime — the actual secrets never touch disk.
@@ -304,7 +381,7 @@ Any S3-compatible endpoint works. Supply the endpoint URL directly — no provid
 
 ## Local development setup
 
-A ready-to-use `docker-compose.yml` is included for local development with MinIO and PostgreSQL:
+A ready-to-use `docker-compose.yml` is included with MinIO, PostgreSQL, and MongoDB:
 
 ```bash
 docker compose up
@@ -321,6 +398,8 @@ backfup init \
   --secret-key minioadmin
 
 backfup add postgres://backfup:backfup@localhost:5432/appdb --name appdb
+backfup add mongodb://backfup:backfup@localhost:27017/appdb?authSource=admin --name mongo
+
 backfup test --storage --database appdb
 backfup studio appdb
 ```
@@ -329,17 +408,17 @@ backfup studio appdb
 
 ## Supported databases
 
-| Database | Dump tool | Status |
-|---|---|---|
-| PostgreSQL | `pg_dump` / `psql` | ✅ MVP |
-| MySQL | `mysqldump` / `mysql` | Planned |
-| MongoDB | `mongodump` / `mongorestore` | Planned |
+| Database | Dump tool | Test | Status |
+|---|---|---|---|
+| PostgreSQL | `pg_dump` / `psql` | `psql` | ✅ MVP |
+| MongoDB | `mongodump` / `mongorestore` | `pymongo` | ✅ MVP |
+| MySQL | `mysqldump` / `mysql` | `mysql` | Planned |
 
 ---
 
 ## Roadmap
 
-- Scheduled backups (`backfup schedule app daily`)
+- Scheduled backups (`backfup schedule app --every 6h`)
 - Retention policies (keep last N backups)
 - Client-side encryption
 - Multi-database backup (`backfup backup --all`)
