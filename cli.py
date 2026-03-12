@@ -9,6 +9,12 @@ from commands.list import list_command
 from commands.backup import backup_run_command
 from commands.backup_list import backup_list_command
 from commands.storage_list import storage_list_command
+from commands.schedule import (
+    schedule_create_command,
+    schedule_edit_command,
+    schedule_remove_command,
+    schedule_list_command,
+)
 
 app = typer.Typer(
     help="Backfup CLI - A tool for backing up data to S3-compatible storage.",
@@ -24,10 +30,8 @@ def backup_callback(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Database name as registered with `backfup add`"),
 ):
-    # Store name in context so subcommands can access it
     ctx.ensure_object(dict)
     ctx.obj = name
-    # If no subcommand (e.g. `backfup backup appdb`), run the backup
     if ctx.invoked_subcommand is None:
         backup_run_command(name)
 
@@ -41,10 +45,19 @@ def _backup_list(ctx: typer.Context):
 storage_app = typer.Typer(help="Inspect storage.", no_args_is_help=True)
 storage_app.command("list")(storage_list_command)
 
+# ─── schedule sub-app ─────────────────────────────────────────────────────────
+
+schedule_app = typer.Typer(help="Manage backup schedules.", no_args_is_help=True)
+schedule_app.command("create")(schedule_create_command)
+schedule_app.command("list")(schedule_list_command)
+schedule_app.command("edit")(schedule_edit_command)
+schedule_app.command("remove")(schedule_remove_command)
+
 # ─── Wire up ──────────────────────────────────────────────────────────────────
 
-app.add_typer(backup_app,  name="backup")
-app.add_typer(storage_app, name="storage")
+app.add_typer(backup_app,   name="backup")
+app.add_typer(storage_app,  name="storage")
+app.add_typer(schedule_app, name="schedule")
 
 app.command("init")(init_command)
 app.command("add")(add_command)
