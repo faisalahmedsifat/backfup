@@ -1,5 +1,8 @@
 {
-  "name": "backfup",
+  "name": "@xyph3r/backfup",
+  "publishConfig": {
+    "access": "public"
+  },
   "version": "0.1.0",
   "description": "Postgres backup CLI — wrap pg_dump/pg_restore with multi-database and S3 support",
   "type": "module",
@@ -21,7 +24,15 @@
     "s3",
     "cli"
   ],
-  "author": "",
+  "author": "Faisal Ahmed <faisalahmedsifat@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/faisalahmedsifat/backfup.git"
+  },
+  "bugs": {
+    "url": "https://github.com/faisalahmedsifat/backfup/issues"
+  },
+  "homepage": "https://github.com/faisalahmedsifat/backfup#readme",
   "license": "MIT",
   "dependencies": {
     "chalk": "^5.4.1",
