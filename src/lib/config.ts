@@ -15,7 +15,7 @@ export interface S3Config {
   endpoint?: string;
 }
 
-export interface PgbackConfig {
+export interface backfupConfig{
   databases: Record<string, string>;
   backupDir: string;
   s3?: S3Config;
@@ -42,7 +42,7 @@ export function interpolateEnv(value: string): string {
 
 /**
  * Resolve the config file path. Uses --config flag if provided,
- * otherwise ~/.pgback/config.json
+ * otherwise ~/.backfup/config.json
  */
 export function getConfigPath(override?: string): string {
   if (override) return resolve(override);
@@ -52,14 +52,14 @@ export function getConfigPath(override?: string): string {
 /**
  * Get the backup directory path.
  */
-export function getBackupDir(config: PgbackConfig): string {
+export function getBackupDir(config: backfupConfig): string {
   return expandPath(config.backupDir);
 }
 
 /**
  * Ensure the config directory and backup directory exist.
  */
-export function ensureDirectories(config: PgbackConfig): void {
+export function ensureDirectories(config: backfupConfig): void {
   const configDir = dirname(DEFAULT_CONFIG_PATH);
   if (!existsSync(configDir)) {
     mkdirSync(configDir, { recursive: true });
@@ -71,10 +71,10 @@ export function ensureDirectories(config: PgbackConfig): void {
 }
 
 /**
- * Load config from ~/.pgback/config.json (or --config override).
+ * Load config from ~/.backfup/config.json (or --config override).
  * Interpolates env vars in database URLs.
  */
-export function loadConfig(configPath?: string): PgbackConfig | null {
+export function loadConfig(configPath?: string):backfupConfig | null {
   const path = getConfigPath(configPath);
 
   if (!existsSync(path)) {
@@ -82,7 +82,7 @@ export function loadConfig(configPath?: string): PgbackConfig | null {
   }
 
   try {
-    const raw = JSON.parse(readFileSync(path, "utf-8")) as PgbackConfig;
+    const raw = JSON.parse(readFileSync(path, "utf-8")) as backfupConfig;
 
     // Interpolate env vars in database URLs
     const databases: Record<string, string> = {};
@@ -98,9 +98,9 @@ export function loadConfig(configPath?: string): PgbackConfig | null {
 }
 
 /**
- * Write config to ~/.pgback/config.json.
+ * Write config to ~/.backfup/config.json.
  */
-export function saveConfig(config: PgbackConfig): void {
+export function saveConfig(config: backfupConfig): void {
   const configDir = dirname(DEFAULT_CONFIG_PATH);
   if (!existsSync(configDir)) {
     mkdirSync(configDir, { recursive: true });

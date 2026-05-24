@@ -1,7 +1,7 @@
 import inquirer from "inquirer";
 import { createLogger, LoggerOptions } from "../lib/logger.js";
 import {
-  PgbackConfig,
+  backfupConfig,
   S3Config,
   loadConfig,
   saveConfig,
@@ -179,7 +179,7 @@ export function registerInitCommand(program: any) {
         }
       }
 
-      const config: PgbackConfig = {
+      const config: backfupConfig = {
         databases,
         backupDir: backupDir.trim(),
       };

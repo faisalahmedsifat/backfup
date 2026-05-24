@@ -5,7 +5,7 @@ import {
   loadConfig,
   getBackupDir,
   ensureDirectories,
-  PgbackConfig,
+  backfupConfig,
 } from "../lib/config.js";
 import { getS3, isS3Available } from "../lib/s3.js";
 
@@ -93,7 +93,7 @@ export function registerListCommand(program: any) {
       const globalOpts = cmd.parent.opts() as LoggerOptions;
       const log = createLogger(globalOpts);
 
-      const config: PgbackConfig | null = loadConfig(opts.config);
+      const config: backfupConfig| null = loadConfig(opts.config);
 
       // Determine backup dir
       let backupDir: string;

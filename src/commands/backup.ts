@@ -7,7 +7,7 @@ import {
   ensureDirectories,
   parseDbUrl,
   redactUrl,
-  PgbackConfig,
+  backfupConfig,
 } from "../lib/config.js";
 import {
   runDump,
@@ -91,7 +91,7 @@ export function registerBackupCommand(program: any) {
         databases["adhoc"] = opts.url;
       } else {
         // Load from config
-        const config: PgbackConfig | null = loadConfig(opts.config);
+        const config: backfupConfig| null = loadConfig(opts.config);
         if (!config) {
           log.error(
             'No config found. Run "backfup init" first or use --url for ad-hoc backups.',
@@ -120,7 +120,7 @@ export function registerBackupCommand(program: any) {
       }
 
       // Load config for backup dir and S3 settings
-      const config: PgbackConfig | null = opts.url
+      const config: backfupConfig | null = opts.url
         ? null
         : loadConfig(opts.config);
       const backupDir = config
