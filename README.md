@@ -1,20 +1,25 @@
-# 🗃️ backfup
+# backfup
 
-**Postgres backup CLI — wrap `pg_dump`/`pg_restore` with multi-database and S3 support.**
-
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-
----
+Postgres backup CLI — wrap `pg_dump`/`pg_restore` with multi-database and S3 support.
 
 `backfup` is a lightweight TypeScript CLI that shells out to the official `pg_dump` and `pg_restore` tools, adding multi-database batching, local compressed storage, and optional S3 uploads. It requires only `pg_dump`/`pg_restore` to be installed on the host — no database drivers, no native modules.
 
-Built for [Bun](https://bun.sh) (>=1.1.0).
+## Install
+
+```bash
+npm install -g @xyph3r/backfup
+```
+
+Or run it without a global install:
+
+```bash
+npx @xyph3r/backfup init
+bunx @xyph3r/backfup init
+```
 
 ## Quick Start
 
 ```bash
-npm install -g backfup
-
 # First-time setup
 backfup init
 
@@ -27,7 +32,7 @@ backfup backup --url postgresql://user:pass@host:5432/mydb
 
 ## Prerequisites
 
-- **Bun >= 1.1.0** (or Node.js >= 18)
+- **Node.js >= 20** (or Bun >= 1.1.0)
 - **PostgreSQL client tools** — `pg_dump` and `pg_restore` ***must be >= your server version***
 
 ### PostgreSQL Client Setup
@@ -61,13 +66,13 @@ pg_dump --version
 #### Docker
 
 ```dockerfile
-FROM oven/bun:1
+FROM node:22-slim
 ARG PG_VERSION=18
 RUN apt update && apt install -y curl gpg
 RUN sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
 RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
 RUN apt update && apt install -y postgresql-client-${PG_VERSION}
-RUN npm install -g backfup
+RUN npm install -g @xyph3r/backfup
 ENTRYPOINT ["backfup"]
 ```
 
@@ -85,7 +90,7 @@ pg_dump must be >= the server version. Install PostgreSQL 18 client:
   brew upgrade libpq
 ```
 
-The version number in the install instructions is always the **actual server version** detected at runtime — no hardcoded assumptions. No more 178-byte files and mystery hangs.
+The version number in the install instructions is always the **actual server version** detected at runtime — no hardcoded assumptions.
 
 ## Commands
 
@@ -221,6 +226,18 @@ The `@aws-sdk/client-s3` package is an optional dependency — it's only importe
 - **Local-first**: S3 is optional. Local backups work with zero external dependencies beyond `pg_dump`.
 - **Streaming**: Backups are streamed through gzip directly to disk — no buffering the entire dump in memory.
 - **Deterministic naming**: `{name}-{YYYYMMDD-HHmmss}.dump.gz` — sortable, human-readable, scriptable.
+
+## Publishing
+
+The package is set up so `npm publish` builds `dist/` during `prepublishOnly`.
+
+Release flow:
+
+1. Install dependencies with `bun install` or `npm install`.
+2. Verify with `bun run build`.
+3. Inspect the tarball with `npm pack --dry-run`.
+4. Log in with `npm login` if needed.
+5. Publish with `npm publish --access public --provenance`.
 
 ## License
 

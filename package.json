@@ -1,20 +1,36 @@
 {
   "name": "@xyph3r/backfup",
-  "publishConfig": {
-    "access": "public"
-  },
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Postgres backup CLI — wrap pg_dump/pg_restore with multi-database and S3 support",
+  "author": "xyph3r",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "backfup": "./dist/bin.js"
   },
-  "main": "./dist/bin.js",
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/faisalahmedsifat/backfup.git"
+  },
+  "bugs": {
+    "url": "https://github.com/faisalahmedsifat/backfup/issues"
+  },
+  "homepage": "https://github.com/faisalahmedsifat/backfup#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "bun run src/bin.ts",
     "build": "tsup",
-    "start": "bun run dist/bin.js",
-    "prepublishOnly": "bun run build"
+    "start": "node dist/bin.js",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "postgresql",
@@ -24,16 +40,6 @@
     "s3",
     "cli"
   ],
-  "author": "Faisal Ahmed <faisalahmedsifat@gmail.com>",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/faisalahmedsifat/backfup.git"
-  },
-  "bugs": {
-    "url": "https://github.com/faisalahmedsifat/backfup/issues"
-  },
-  "homepage": "https://github.com/faisalahmedsifat/backfup#readme",
-  "license": "MIT",
   "dependencies": {
     "chalk": "^5.4.1",
     "cli-table3": "^0.6.5",
@@ -49,11 +55,5 @@
     "@types/node": "^22.0.0",
     "tsup": "^8.3.0",
     "typescript": "^5.7.0"
-  },
-  "files": [
-    "dist"
-  ],
-  "engines": {
-    "bun": ">=1.1.0"
   }
 }
